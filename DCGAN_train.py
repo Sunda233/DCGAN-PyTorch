@@ -1,3 +1,7 @@
+'''
+
+对于唐卡训练集的训练
+'''
 import argparse
 import os
 import numpy as np
@@ -14,24 +18,27 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 
+from DCGAN_DataUtils import TrainDatasetFromFolder
+
 os.makedirs("images", exist_ok=True)
 
 parser = argparse.ArgumentParser()  # 命令行选项、参数和子命令解析器
-parser.add_argument("--n_epochs", type=int, default=200, help="number of epochs of training")  # 迭代次数
-parser.add_argument("--batch_size", type=int, default=64, help="size of the batches")  # batch大小
-parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")  # 学习率
-parser.add_argument("--b1", type=float, default=0.5,
-                    help="adam: decay of first order momentum of gradient")  # 动量梯度下降第一个参数
-parser.add_argument("--b2", type=float, default=0.999,
-                    help="adam: decay of first order momentum of gradient")  # 动量梯度下降第二个参数
-parser.add_argument("--n_cpu", type=int, default=8,
-                    help="number of cpu threads to use during batch generation")  # CPU个数
+parser.add_argument("--n_epochs", type=int, default=1000, help="number of epochs of training")  # 迭代次数
+parser.add_argument("--batch_size", type=int, default=128, help="size of the batches")  # batch大小  64
+parser.add_argument("--lr", type=float, default=0.005, help="adam: learning rate")  # 学习率 0.0002
+parser.add_argument("--b1", type=float, default=0.5,help="adam: decay of first order momentum of gradient")  # 动量梯度下降第一个参数
+parser.add_argument("--b2", type=float, default=0.999,help="adam: decay of first order momentum of gradient")  # 动量梯度下降第二个参数
+parser.add_argument("--n_cpu", type=int, default=8,help="number of cpu threads to use during batch generation")  # CPU个数
 parser.add_argument("--latent_dim", type=int, default=100, help="dimensionality of the latent space")  # 噪声数据生成维度
-parser.add_argument("--img_size", type=int, default=32, help="size of each image dimension")  # 输入数据的维度
-parser.add_argument("--channels", type=int, default=1, help="number of image channels")  # 输入数据的通道数
-parser.add_argument("--sample_interval", type=int, default=400, help="interval between image sampling")  # 保存图像的迭代数
+parser.add_argument("--channels", type=int, default=3, help="number of image channels")  # 输入数据的通道数
+parser.add_argument("--sample_interval", type=int, default=80, help="interval between image sampling")  # 保存图像的迭代数 400
+parser.add_argument("--img_size", type=int, default=64, help="size of each image dimension")  # 图像的大小
+parser.add_argument('--crop_size', default=64, type=int, help='training images crop size，训练图像裁剪大小')
+parser.add_argument('--upscale_factor', default=1, type=int, choices=[2, 4, 8], help='super resolution upscale factor')# 进行四倍上采样
+
 opt = parser.parse_args()
 print(opt)
+
 
 cuda = True if torch.cuda.is_available() else False  # 判断GPU可用，有GPU用GPU，没有用CPU
 
@@ -46,7 +53,7 @@ def weights_init_normal(m):
         torch.nn.init.normal_(m.weight.data, 1.0, 0.02)
         torch.nn.init.constant_(m.bias.data, 0.0)
 
-
+# 生成器
 class Generator(nn.Module):
     def __init__(self):
         super(Generator, self).__init__()
@@ -125,23 +132,33 @@ if cuda:  # 初始化，将数据放在cuda上
 generator.apply(weights_init_normal)
 discriminator.apply(weights_init_normal)
 
+
 # Configure data loader
 # 配置数据加载器
-os.makedirs("../../data/mnist", exist_ok=True)
-dataloader = torch.utils.data.DataLoader(  # 显卡加速
-    datasets.MNIST(
-        "../../data/mnist",  # 进行训练集下载
-        train=True,
-        download=True,
-        transform=transforms.Compose(
-            [transforms.Resize(opt.img_size), transforms.ToTensor(), transforms.Normalize([0.5], [0.5])]
-        ),
-    ),
-    batch_size=opt.batch_size,
-    shuffle=True,
-)
+# os.makedirs("../../data/mnist", exist_ok=True)
+# dataloader = torch.utils.data.DataLoader(  # 显卡加速
+#     datasets.MNIST(
+#         "../../data/mnist",  # 进行训练集下载
+#         train=True,
+#         download=True,
+#         transform=transforms.Compose(
+#             [transforms.Resize(opt.img_size), transforms.ToTensor(), transforms.Normalize([0.5], [0.5])]
+#         ),
+#     ),
+#     batch_size=opt.batch_size,
+#     shuffle=True,
+# )
 
+# 装载数据
+CROP_SIZE = opt.crop_size
+UPSCALE_FACTOR = opt.upscale_factor
+BENCH_SIZE = opt.batch_size
+train_set = TrainDatasetFromFolder(r'E:\CODE\DATA\TK\生成图像\生成图像\生成图像--合肥工业大学--20220329\生成图像\云纹', crop_size=CROP_SIZE, upscale_factor=UPSCALE_FACTOR,)  # 裁剪尺寸，放大倍数
+# E:\CODE\DATA\TK\生成图像\生成图像\生成图像--合肥工业大学--20220329\生成图像\水纹
+# train_set = TrainDatasetFromFolder(r'E:\CODE\DATA\TK\生成图像\生成图像\生成图像--合肥工业大学--20220329\生成图像\水纹2', crop_size=CROP_SIZE, upscale_factor=UPSCALE_FACTOR,)  # 裁剪尺寸，放大倍数
 
+# 装载数据 调用datautils
+dataloader = DataLoader(dataset=train_set, num_workers=0, batch_size=BENCH_SIZE, shuffle=True)
 
 # Optimizers 定义神经网络的优化器  Adam就是一种优化器
 optimizer_G = torch.optim.Adam(generator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
@@ -163,9 +180,8 @@ for epoch in range(opt.n_epochs):
         # Configure input
         real_imgs = Variable(imgs.type(Tensor))  # 将真实的图片转化为神经网络可以处理的变量
 
-        print(real_imgs)
-        print(real_imgs.shape)
-        input()
+        # print(real_imgs)
+        # print(real_imgs.shape)
 
         # -----------------
         #  Train Generator
@@ -183,6 +199,10 @@ for epoch in range(opt.n_epochs):
         # Loss measures generator's ability to fool the discriminator
         g_loss = adversarial_loss(discriminator(gen_imgs), valid)
 
+        # 释放无关内存
+        if hasattr(torch.cuda, 'empty_cache'):
+            torch.cuda.empty_cache()
+        # -----------------------------------------------
         g_loss.backward()  # 反向传播和模型更新
         optimizer_G.step()
 
@@ -207,4 +227,4 @@ for epoch in range(opt.n_epochs):
 
         batches_done = epoch * len(dataloader) + i
         if batches_done % opt.sample_interval == 0:
-            save_image(gen_imgs.data[:25], "images/%d.png" % batches_done, nrow=5, normalize=True)
+            save_image(gen_imgs.data[:9], "images/%d.png" % batches_done, nrow=3, normalize=True) # 设定保存图片数目  25  5
